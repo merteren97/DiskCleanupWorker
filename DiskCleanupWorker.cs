@@ -2,8 +2,8 @@
 {
     private readonly ILogger<DiskCleanupWorker> _logger;
     private readonly string _driveLetter = "C:";  // Disk sürücüsü harfi
-    private readonly double _maxPercentage = 60.0;  // Maksimum doluluk yüzdesi
-    private readonly double _minPercentage = 40.0;  // Minimum doluluk yüzdesi
+    private readonly double _maxPercentage = 20.0;  // Maksimum doluluk yüzdesi
+    private readonly double _minPercentage = 19.0;  // Minimum doluluk yüzdesi
     private readonly string _pathForImages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Visiomex", "Images");
     private readonly string _pathForResultImages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Visiomex", "ResultImage");
     public DiskCleanupWorker(ILogger<DiskCleanupWorker> logger)
@@ -17,25 +17,38 @@
         try
         {
             // Disk Temizleyici fonksiyonu çağır
-            await DiskCleaner();
+            await DiskCleaner(stoppingToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Hata oluştu.");
         }
-
-        _logger.LogInformation("DiskCleanupWorker finished at: {time}", DateTimeOffset.Now);
+        finally
+        {
+            // İşlem tamamlandığında kapanış işlemi
+            _logger.LogInformation("DiskCleanupWorker finished at: {time}", DateTimeOffset.Now);
+        }
     }
-    public async Task DiskCleaner()
+    public async Task DiskCleaner(CancellationToken stoppingToken)
     {
-        double diskUsagePercentage = GetDiskUsagePercentage(_driveLetter);
+        // Eğer CancellationToken tetiklenmişse, işi iptal et
+        if (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Servis iptal edildi.");
+            return;
+        }
 
+        // Disk doluluğunu kontrol et ve dosyaları temizle
+        double diskUsagePercentage = GetDiskUsagePercentage(_driveLetter);
         _logger.LogInformation($"[{DateTime.Now}] Disk Doluluğu: {diskUsagePercentage}%");
 
         if (diskUsagePercentage >= _maxPercentage)
         {
             DeleteOldestFolders(_pathForImages);
         }
+
+        // İşlem tamamlandı, servis sonlanabilir
+        stoppingToken.ThrowIfCancellationRequested();
     }
     private double GetDiskUsagePercentage(string driveLetter)
     {
@@ -85,7 +98,6 @@
                 }
             }
         }
-
         if (GetDiskUsagePercentage(_driveLetter) > _minPercentage)
         {
             _logger.LogInformation("Klasörler silindi ama minimum disk doluluğuna ulaşılamadı. Dosyalar siliniyor...");
